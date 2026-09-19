@@ -49,8 +49,18 @@ def test_merge_cancel_removes_incomplete(two_pdfs, tmp_path: Path):
     dest = tmp_path / "out.pdf"
     ev = threading.Event()
     ev.set()
-    merge_pdfs([a, b], dest, cancel_event=ev)
+    assert merge_pdfs([a, b], dest, cancel_event=ev) is False
     assert not dest.exists()
+
+
+def test_merge_cancel_existing_dest_returns_false(two_pdfs, tmp_path: Path):
+    a, b = two_pdfs
+    dest = tmp_path / "out.pdf"
+    dest.write_bytes(b"old-dest")
+    ev = threading.Event()
+    ev.set()
+    assert merge_pdfs([a, b], dest, cancel_event=ev) is False
+    assert dest.read_bytes() == b"old-dest"
 
 
 def test_delete_pages_keeps_remaining(tmp_path: Path):
@@ -59,6 +69,15 @@ def test_delete_pages_keeps_remaining(tmp_path: Path):
     delete_pages(src, dest, {1, 3})
     assert len(PdfReader(dest).pages) == 2
     assert src.exists()
+
+
+def test_delete_cancel_inplace_existing_dest_returns_false(tmp_path: Path):
+    src = make_blank_pdf(tmp_path / "src.pdf", 4)
+    original = src.read_bytes()
+    ev = threading.Event()
+    ev.set()
+    assert delete_pages(src, src, {1}, cancel_event=ev) is False
+    assert src.read_bytes() == original
 
 
 def test_delete_all_pages_forbidden(tmp_path: Path):

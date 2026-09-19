@@ -2,6 +2,7 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+import threading
 import time
 from pathlib import Path
 from unittest.mock import patch
@@ -10,7 +11,7 @@ from office_assistant.qt_preload import preload_pyside6
 
 preload_pyside6()
 
-from PySide6.QtWidgets import QApplication, QCheckBox, QPushButton, QTableWidget
+from PySide6.QtWidgets import QApplication, QCheckBox, QFileDialog, QPushButton, QTableWidget
 from pypdf import PdfReader, PdfWriter
 
 from office_assistant.naming import unique_path
@@ -202,7 +203,7 @@ def test_merge_via_start_job_and_default_save_name(tmp_path: Path):
     dest = tmp_path / "合同_合并.pdf"
     captured: dict[str, str] = {}
 
-    def fake_save(parent, title, start, filt=""):
+    def fake_save(parent, title, start, filt="", **kwargs):
         captured["start"] = start
         return str(dest), "PDF (*.pdf)"
 
@@ -270,4 +271,82 @@ def test_dest_exists_unique_overwrite_cancel(tmp_path: Path):
         _button(page, "开始合并").click()
         _wait_until(lambda: dest.stat().st_size != 3 and win._thread is None)
     assert len(PdfReader(dest).pages) == 2
+    _ = app
+
+
+def test_merge_existing_dest_cancel_no_success_summary(tmp_path: Path):
+    app = _app()
+    win = MainWindow()
+    page = _page(win)
+    a = make_blank_pdf(tmp_path / "a.pdf", 1)
+    b = make_blank_pdf(tmp_path / "b.pdf", 1)
+    page.add_paths([a, b])
+    dest = tmp_path / "out.pdf"
+    dest.write_bytes(b"old-dest")
+    ev = threading.Event()
+    ev.set()
+    with (
+        patch.object(page, "_cancel_event", return_value=ev),
+        patch("office_assistant.ui.merge_page.QFileDialog.getSaveFileName", return_value=(str(dest), "")),
+        patch("office_assistant.ui.merge_page.ask_existing_dest", return_value=dest),
+    ):
+        _button(page, "开始合并").click()
+        _wait_until(lambda: win._thread is None)
+    assert dest.read_bytes() == b"old-dest"
+    summary = win.summary_label.text()
+    assert "已保存" not in summary
+    assert "已合并" not in summary
+    _ = app
+
+
+def test_unique_dest_avoids_skipped_source(tmp_path: Path):
+    app = _app()
+    win = MainWindow()
+    page = _page(win)
+    a = make_blank_pdf(tmp_path / "a.pdf", 1)
+    b = make_blank_pdf(tmp_path / "b.pdf", 1)
+    skipped = tmp_path / "bad.pdf"
+    skipped.write_bytes(b"not-a-pdf")
+    page.add_paths([a, skipped, b])
+    _checkbox(page, "合并其余完好文件").setChecked(True)
+    dest = tmp_path / "out.pdf"
+    dest.write_bytes(b"old")
+    with (
+        patch("office_assistant.ui.merge_page.QFileDialog.getSaveFileName", return_value=(str(dest), "")),
+        patch("office_assistant.ui.merge_page.ask_existing_dest", return_value=skipped),
+        patch("office_assistant.ui.merge_page.QMessageBox.warning") as warn,
+    ):
+        _button(page, "开始合并").click()
+        _wait_until(lambda: win._thread is None)
+    assert skipped.read_bytes() == b"not-a-pdf"
+    source_keys = {a.resolve(), b.resolve(), skipped.resolve()}
+    summary = win.summary_label.text()
+    if warn.called:
+        assert "已合并" not in summary
+    else:
+        assert summary.startswith("已合并保存到")
+        saved_name = summary.split("到 ", 1)[-1]
+        saved = tmp_path / saved_name
+        assert saved.resolve() not in source_keys
+        assert len(PdfReader(saved).pages) == 2
+    _ = app
+
+
+def test_merge_save_dialog_dont_confirm_overwrite(tmp_path: Path):
+    app = _app()
+    win = MainWindow()
+    page = _page(win)
+    a = make_blank_pdf(tmp_path / "a.pdf", 1)
+    b = make_blank_pdf(tmp_path / "b.pdf", 1)
+    page.add_paths([a, b])
+    with patch(
+        "office_assistant.ui.merge_page.QFileDialog.getSaveFileName",
+        return_value=("", ""),
+    ) as mock_save:
+        _button(page, "开始合并").click()
+        app.processEvents()
+    mock_save.assert_called_once()
+    options = mock_save.call_args.kwargs.get("options")
+    assert options is not None
+    assert options & QFileDialog.Option.DontConfirmOverwrite
     _ = app

@@ -68,7 +68,7 @@ def merge_pdfs(
     dest: Path,
     passwords: dict[Path, str] | None = None,
     cancel_event: threading.Event | None = None,
-) -> None:
+) -> bool:
     dest_resolved = dest.resolve()
     for path in paths:
         if path.resolve() == dest_resolved:
@@ -78,7 +78,7 @@ def merge_pdfs(
     for path in paths:
         if _cancelled(cancel_event):
             _remove_path(_temp_for(dest))
-            return
+            return False
         password = _lookup_password(path, passwords)
         info = probe_pdf(path, password)
         if not info.ok:
@@ -88,12 +88,12 @@ def merge_pdfs(
             writer.add_page(page)
             if _cancelled(cancel_event):
                 _remove_path(_temp_for(dest))
-                return
+                return False
 
     if _cancelled(cancel_event):
         _remove_path(_temp_for(dest))
-        return
-    _write_atomically(writer, dest, cancel_event)
+        return False
+    return _write_atomically(writer, dest, cancel_event)
 
 
 def render_thumbnail(
@@ -133,7 +133,7 @@ def delete_pages(
     pages_to_delete: set[int],
     password: str | None = None,
     cancel_event: threading.Event | None = None,
-) -> None:
+) -> bool:
     info = probe_pdf(src, password)
     if not info.ok:
         raise ValueError(info.error)
@@ -144,7 +144,7 @@ def delete_pages(
 
     if _cancelled(cancel_event):
         _remove_path(_temp_for(dest))
-        return
+        return False
 
     reader = _open_reader(src, password)
     writer = PdfWriter()
@@ -152,12 +152,12 @@ def delete_pages(
         writer.add_page(reader.pages[index - 1])
         if _cancelled(cancel_event):
             _remove_path(_temp_for(dest))
-            return
+            return False
 
     if _cancelled(cancel_event):
         _remove_path(_temp_for(dest))
-        return
-    _write_atomically(writer, dest, cancel_event)
+        return False
+    return _write_atomically(writer, dest, cancel_event)
 
 
 def _cancelled(cancel_event: threading.Event | None) -> bool:
@@ -213,7 +213,7 @@ def _write_atomically(
     writer: PdfWriter,
     dest: Path,
     cancel_event: threading.Event | None,
-) -> None:
+) -> bool:
     dest_existed = dest.exists()
     temp = _temp_for(dest)
     try:
@@ -221,7 +221,7 @@ def _write_atomically(
             _remove_path(temp)
             if not dest_existed:
                 _remove_path(dest)
-            return
+            return False
         dest.parent.mkdir(parents=True, exist_ok=True)
         with temp.open("wb") as fh:
             writer.write(fh)
@@ -229,8 +229,9 @@ def _write_atomically(
             _remove_path(temp)
             if not dest_existed:
                 _remove_path(dest)
-            return
+            return False
         os.replace(temp, dest)
+        return True
     except Exception:
         _remove_path(temp)
         if not dest_existed:

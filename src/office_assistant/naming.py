@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
@@ -98,6 +99,25 @@ def unique_path(path: Path) -> Path:
         candidate = path.with_name(f"{stem}_{n}{suffix}")
         if not candidate.exists():
             return candidate
+        n += 1
+
+
+def _resolved(path: Path) -> Path:
+    try:
+        return path.resolve()
+    except OSError:
+        return path
+
+
+def unique_path_excluding(path: Path, excluded: Iterable[Path]) -> Path:
+    excluded_keys = {_resolved(item) for item in excluded}
+    stem, suffix = path.stem, path.suffix
+    n = 2
+    candidate = unique_path(path)
+    while True:
+        if not candidate.exists() and _resolved(candidate) not in excluded_keys:
+            return candidate
+        candidate = path.with_name(f"{stem}_{n}{suffix}")
         n += 1
 
 

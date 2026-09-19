@@ -12,6 +12,7 @@ from office_assistant.naming import (
     parse_page_ranges,
     sanitize_stem,
     unique_path,
+    unique_path_excluding,
 )
 
 
@@ -82,6 +83,15 @@ def test_unique_path_adds_numeric_suffix(tmp_path: Path):
     second.write_bytes(b"y")
     third = unique_path(first)
     assert third == tmp_path / "合同_合并_3.pdf"
+
+
+def test_unique_path_excluding_skips_source_names(tmp_path: Path):
+    dest = tmp_path / "out.pdf"
+    dest.write_bytes(b"x")
+    source = tmp_path / "out_2.pdf"
+    result = unique_path_excluding(dest, [source])
+    assert result == tmp_path / "out_3.pdf"
+    assert result.resolve() != source.resolve()
 
 
 def test_parse_and_format_page_ranges():

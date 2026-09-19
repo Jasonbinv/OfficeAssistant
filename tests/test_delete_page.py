@@ -2,6 +2,7 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+import threading
 import time
 from pathlib import Path
 from unittest.mock import patch
@@ -14,6 +15,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
+    QFileDialog,
     QListWidget,
     QMessageBox,
     QPushButton,
@@ -166,7 +168,7 @@ def test_save_as_via_start_job(tmp_path: Path):
     dest = tmp_path / "源文件_删页.pdf"
     captured: dict[str, str] = {}
 
-    def fake_save(parent, title, start, filt=""):
+    def fake_save(parent, title, start, filt="", **kwargs):
         captured["start"] = start
         return str(dest), "PDF (*.pdf)"
 
@@ -215,4 +217,122 @@ def test_overwrite_confirm_and_locked(tmp_path: Path):
         _button(page, "另存为").click()
         _wait_until(lambda: win._thread is None and len(PdfReader(src).pages) == 2)
     assert len(PdfReader(src).pages) == 2
+    _ = app
+
+
+def test_inplace_delete_cancel_no_success_summary(tmp_path: Path):
+    app = _app()
+    win = MainWindow()
+    page = _page(win)
+    src = make_blank_pdf(tmp_path / "src.pdf", 3)
+    original = src.read_bytes()
+    page.open_pdf(src)
+    page.pages_edit.setText("2")
+    page.pages_edit.editingFinished.emit()
+    _checkbox(page, "覆盖原文件").setChecked(True)
+    ev = threading.Event()
+    ev.set()
+    with (
+        patch.object(page, "_cancel_event", return_value=ev),
+        patch("office_assistant.ui.delete_page.is_locked", return_value=False),
+        patch(
+            "office_assistant.ui.delete_page.QMessageBox.question",
+            return_value=QMessageBox.StandardButton.Yes,
+        ),
+    ):
+        _button(page, "另存为").click()
+        _wait_until(lambda: win._thread is None)
+    assert src.read_bytes() == original
+    summary = win.summary_label.text()
+    assert "已保存" not in summary
+    assert "已合并" not in summary
+    _ = app
+
+
+def test_delete_unique_dest_not_source(tmp_path: Path):
+    app = _app()
+    win = MainWindow()
+    page = _page(win)
+    src = make_blank_pdf(tmp_path / "src.pdf", 4)
+    page.open_pdf(src)
+    page.pages_edit.setText("1")
+    page.pages_edit.editingFinished.emit()
+    dest = tmp_path / "out.pdf"
+    dest.write_bytes(b"old")
+    with (
+        patch("office_assistant.ui.delete_page.QFileDialog.getSaveFileName", return_value=(str(dest), "")),
+        patch("office_assistant.ui.delete_page.ask_existing_dest", return_value=src),
+        patch("office_assistant.ui.delete_page.QMessageBox.warning") as warn,
+        patch("office_assistant.ui.delete_page.QMessageBox.question") as question,
+    ):
+        _button(page, "另存为").click()
+        _wait_until(lambda: win._thread is None)
+    assert len(PdfReader(src).pages) == 4
+    if question.called:
+        return
+    if warn.called:
+        assert "已保存" not in win.summary_label.text()
+        return
+    summary = win.summary_label.text()
+    assert summary.startswith("已保存到")
+    saved_name = summary.split("到 ", 1)[-1]
+    assert saved_name != src.name
+    _ = app
+
+
+def test_overwrite_cancels_thumbs_before_is_locked(tmp_path: Path):
+    app = _app()
+    win = MainWindow()
+    page = _page(win)
+    src = make_blank_pdf(tmp_path / "src.pdf", 3)
+    page.open_pdf(src)
+    page.pages_edit.setText("2")
+    page.pages_edit.editingFinished.emit()
+    _checkbox(page, "覆盖原文件").setChecked(True)
+    order: list[str] = []
+    original_cancel = page._cancel_thumbs
+
+    def cancel_and_record() -> None:
+        order.append("cancel")
+        original_cancel()
+
+    def locked(_path: Path) -> bool:
+        order.append("locked")
+        return True
+
+    with (
+        patch.object(page, "_cancel_thumbs", side_effect=cancel_and_record),
+        patch("office_assistant.ui.delete_page.is_locked", side_effect=locked),
+        patch(
+            "office_assistant.ui.delete_page.QMessageBox.question",
+            return_value=QMessageBox.StandardButton.Yes,
+        ),
+        patch("office_assistant.ui.delete_page.QMessageBox.warning"),
+    ):
+        _button(page, "另存为").click()
+        app.processEvents()
+    assert "cancel" in order
+    assert "locked" in order
+    assert order.index("cancel") < order.index("locked")
+    _ = app
+
+
+def test_delete_save_dialog_dont_confirm_overwrite(tmp_path: Path):
+    app = _app()
+    win = MainWindow()
+    page = _page(win)
+    src = make_blank_pdf(tmp_path / "src.pdf", 3)
+    page.open_pdf(src)
+    page.pages_edit.setText("1")
+    page.pages_edit.editingFinished.emit()
+    with patch(
+        "office_assistant.ui.delete_page.QFileDialog.getSaveFileName",
+        return_value=("", ""),
+    ) as mock_save:
+        _button(page, "另存为").click()
+        app.processEvents()
+    mock_save.assert_called_once()
+    options = mock_save.call_args.kwargs.get("options")
+    assert options is not None
+    assert options & QFileDialog.Option.DontConfirmOverwrite
     _ = app

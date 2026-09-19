@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from office_assistant.naming import natural_sort_key, unique_path
+from office_assistant.naming import natural_sort_key, unique_path, unique_path_excluding
 from office_assistant.pdf_ops import merge_pdfs, probe_pdf
 from office_assistant.qt_preload import preload_pyside6
 
@@ -49,6 +49,17 @@ def ask_existing_dest(parent: QWidget | None, dest: Path) -> Path | None:
     if clicked == overwrite_btn:
         return dest
     return None
+
+
+def _same_path(left: Path, right: Path) -> bool:
+    try:
+        return left.resolve() == right.resolve()
+    except OSError:
+        return left == right
+
+
+def _dest_is_source(dest: Path, sources: list[Path]) -> bool:
+    return any(_same_path(dest, src) for src in sources)
 
 
 class _MergeTable(QTableWidget):
@@ -349,24 +360,35 @@ class MergePage(QWidget):
             return
         first = good[0]
         default = first.with_name(f"{first.stem}_合并.pdf")
-        chosen, _ = QFileDialog.getSaveFileName(self, "保存合并结果", str(default), "PDF (*.pdf)")
+        chosen, _ = QFileDialog.getSaveFileName(
+            self,
+            "保存合并结果",
+            str(default),
+            "PDF (*.pdf)",
+            options=QFileDialog.Option.DontConfirmOverwrite,
+        )
         if not chosen:
             return
         dest = Path(chosen)
         sources = self._all_paths()
-        if any(path.resolve() == dest.resolve() for path in sources):
+        if _dest_is_source(dest, sources):
             QMessageBox.warning(self, "提示", "输出路径不能与源文件相同，请换一个名字")
             return
         if dest.exists():
             dest = ask_existing_dest(self, dest)
             if dest is None:
                 return
+        if _dest_is_source(dest, sources):
+            dest = unique_path_excluding(dest, sources)
+            if _dest_is_source(dest, sources):
+                QMessageBox.warning(self, "提示", "输出路径不能与源文件相同，请换一个名字")
+                return
         paths = list(good)
         passwords = dict(self.passwords)
 
         def job():
-            merge_pdfs(paths, dest, passwords=passwords, cancel_event=self._cancel_event())
-            return dest if dest.exists() else None
+            completed = merge_pdfs(paths, dest, passwords=passwords, cancel_event=self._cancel_event())
+            return dest if completed else None
 
         self.start_btn.setEnabled(False)
         self._start_job(job, self._on_merge_done)

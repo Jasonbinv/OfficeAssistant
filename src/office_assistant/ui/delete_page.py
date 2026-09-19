@@ -4,7 +4,7 @@ import threading
 from pathlib import Path
 
 from office_assistant.fs_ops import is_locked
-from office_assistant.naming import format_page_ranges, parse_page_ranges, unique_path
+from office_assistant.naming import format_page_ranges, parse_page_ranges, unique_path, unique_path_excluding
 from office_assistant.pdf_ops import delete_pages, probe_pdf, render_thumbnail
 from office_assistant.qt_preload import preload_pyside6
 
@@ -180,7 +180,7 @@ class DeletePage(QWidget):
         self._thumb_worker = None
         if thread is not None:
             thread.quit()
-            thread.wait(3000)
+            thread.wait()
 
     def _clear_thumb_thread(self) -> None:
         sender = self.sender()
@@ -416,6 +416,18 @@ class DeletePage(QWidget):
         answer = QMessageBox.question(self, "确认", "确定覆盖原文件？")
         return answer == QMessageBox.StandardButton.Yes
 
+    def _prepare_overwrite_src(self) -> Path | None:
+        src = self._src
+        if src is None:
+            return None
+        if not self._confirm_overwrite():
+            return None
+        self._cancel_thumbs()
+        if is_locked(src):
+            QMessageBox.warning(self, "提示", "文件被占用，请先关闭后再试")
+            return None
+        return src
+
     def _prepare_dest(self) -> Path | None:
         src = self._src
         if src is None:
@@ -424,20 +436,26 @@ class DeletePage(QWidget):
             dest = src
         else:
             default = src.with_name(f"{src.stem}_删页.pdf")
-            chosen, _ = QFileDialog.getSaveFileName(self, "另存为", str(default), "PDF (*.pdf)")
+            chosen, _ = QFileDialog.getSaveFileName(
+                self,
+                "另存为",
+                str(default),
+                "PDF (*.pdf)",
+                options=QFileDialog.Option.DontConfirmOverwrite,
+            )
             if not chosen:
                 return None
             dest = Path(chosen)
         if dest.resolve() == src.resolve():
-            if not self._confirm_overwrite():
-                return None
-            if is_locked(src):
-                QMessageBox.warning(self, "提示", "文件被占用，请先关闭后再试")
-                return None
-            return src
+            return self._prepare_overwrite_src()
         if dest.exists():
             dest = ask_existing_dest(self, dest)
             if dest is None:
+                return None
+        if dest.resolve() == src.resolve():
+            dest = unique_path_excluding(dest, [src])
+            if dest.resolve() == src.resolve():
+                QMessageBox.warning(self, "提示", "输出路径不能与源文件相同，请换一个名字")
                 return None
         return dest
 
@@ -450,10 +468,12 @@ class DeletePage(QWidget):
         src = self._src
         pages = set(self.selected_pages)
         password = self._password
+        if dest.resolve() == src.resolve():
+            self._cancel_thumbs()
 
         def job():
-            delete_pages(src, dest, pages, password=password, cancel_event=self._cancel_event())
-            return dest if dest.exists() else None
+            completed = delete_pages(src, dest, pages, password=password, cancel_event=self._cancel_event())
+            return dest if completed else None
 
         self.save_btn.setEnabled(False)
         self._start_job(job, self._on_delete_done)
