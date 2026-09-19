@@ -1,0 +1,10 @@
+办公文件助手 (OfficeAssistant)
+
+本程序使用 PySide6 / Qt for Python 提供图形界面。Qt 库以动态链接库（.dll）形式随包分发，
+未静态编入 OfficeAssistant.exe。
+
+PySide6 与 Qt 在适用情况下以 GNU Lesser General Public License v3（LGPL-3.0）授权。
+本目录中的 LGPL-3.0.txt 为 FSF 发布的 LGPL v3 全文；亦可自下列地址获取：
+https://www.gnu.org/licenses/lgpl-3.0.txt
+
+各 Python 组件的完整许可文本见 _internal 下对应 *.dist-info/licenses 目录。
