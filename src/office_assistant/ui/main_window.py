@@ -6,7 +6,7 @@ from typing import Any
 
 from office_assistant.tasks.worker import JobWorker
 from office_assistant.ui.rename_page import RenamePage
-from PySide6.QtCore import QThread
+from PySide6.QtCore import QThread, QTimer
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -31,6 +31,7 @@ class MainWindow(QMainWindow):
         self._thread: QThread | None = None
         self._worker: JobWorker | None = None
         self._on_done: Callable[[Any], None] | None = None
+        self._job_queue: list[tuple[Callable[[], Any], Callable[[Any], None] | None]] = []
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -75,7 +76,8 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
 
     def start_job(self, fn: Callable[[], Any], on_done: Callable[[Any], None] | None = None) -> None:
-        if self._thread is not None and self._thread.isRunning():
+        if self._thread is not None:
+            self._job_queue.append((fn, on_done))
             return
         self._on_done = on_done
         self.cancel_event = threading.Event()
@@ -119,5 +121,12 @@ class MainWindow(QMainWindow):
         self.progress_bar.setValue(100)
 
     def _clear_job(self) -> None:
+        sender = self.sender()
+        if sender is not None and sender is not self._thread:
+            return
         self._thread = None
         self._worker = None
+        if not self._job_queue:
+            return
+        fn, on_done = self._job_queue.pop(0)
+        QTimer.singleShot(0, lambda: self.start_job(fn, on_done))

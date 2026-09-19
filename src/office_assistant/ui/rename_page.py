@@ -21,7 +21,7 @@ from office_assistant.rename_ops import (
 
 preload_pyside6()
 
-from PySide6.QtCore import QTimer, Qt, Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QBrush, QDragEnterEvent, QDragMoveEvent, QDropEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -408,17 +408,10 @@ class RenamePage(QWidget):
     def _cancel_event(self):
         return getattr(self.window(), "cancel_event", None)
 
-    def _start_job(self, fn, on_done, _tries: int = 0) -> None:
+    def _start_job(self, fn, on_done) -> None:
         window = self.window()
         start = getattr(window, "start_job", None)
         if callable(start):
-            thread = getattr(window, "_thread", None)
-            if thread is not None and thread.isRunning():
-                if _tries > 100:
-                    QMessageBox.warning(self, "提示", "仍有任务在执行")
-                    return
-                QTimer.singleShot(20, lambda: self._start_job(fn, on_done, _tries + 1))
-                return
             start(fn, on_done)
             return
         try:

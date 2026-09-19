@@ -233,3 +233,21 @@ def test_execute_and_undo_via_start_job(tmp_path: Path):
     assert (tmp_path / "扫描2.pdf").exists()
     assert not (tmp_path / "水施-01_封皮.pdf").exists()
     _ = app
+
+
+def test_undo_immediately_when_enabled_after_confirm(tmp_path: Path):
+    app = _app()
+    win = MainWindow()
+    page = _page(win)
+    _touch(tmp_path, "扫描1.pdf")
+    _touch(tmp_path, "扫描2.pdf")
+    _load_dir(page, tmp_path)
+    page.name_edit.setPlainText("水施-01_封皮\n水施-01_图纸目录")
+
+    _button(page, "确认重命名").click()
+    _wait_until(lambda: _button(page, "撤销上次重命名").isEnabled())
+    _button(page, "撤销上次重命名").click()
+    _wait_until(lambda: (tmp_path / "扫描1.pdf").exists() and (tmp_path / "扫描2.pdf").exists())
+    assert not (tmp_path / "水施-01_封皮.pdf").exists()
+    assert not (tmp_path / "水施-01_图纸目录.pdf").exists()
+    _ = app
