@@ -1,4 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
+import shutil
 from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_all
@@ -8,6 +9,7 @@ root = spec_dir.parent
 src = root / "src"
 entry = src / "office_assistant" / "app.py"
 licenses_dir = spec_dir / "licenses"
+user_guide = root / "使用说明.txt"
 
 pyside_datas, pyside_binaries, pyside_hidden = collect_all("PySide6")
 shiboken_datas, shiboken_binaries, shiboken_hidden = collect_all("shiboken6")
@@ -22,7 +24,7 @@ a = Analysis(
     + shiboken_datas
     + pdfium_datas
     + pillow_datas
-    + [(str(licenses_dir), "licenses")],
+    + [(str(licenses_dir), "licenses"), (str(user_guide), ".")],
     hiddenimports=pyside_hidden
     + shiboken_hidden
     + pdfium_hidden
@@ -53,3 +55,8 @@ exe = EXE(
     console=False,
 )
 coll = COLLECT(exe, a.binaries, a.datas, name="OfficeAssistant")
+
+# PyInstaller 6 onedir: "." datas land under _internal; copy user guide beside the exe.
+_dist_app = Path(DISTPATH) / "OfficeAssistant"
+if user_guide.is_file() and _dist_app.is_dir():
+    shutil.copy2(user_guide, _dist_app / user_guide.name)
