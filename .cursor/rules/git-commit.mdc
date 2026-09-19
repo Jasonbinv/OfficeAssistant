@@ -1,0 +1,23 @@
+---
+description: Git commit 使用中文，且不得包含 Cursor 共著者信息
+alwaysApply: true
+---
+
+# Git 提交说明
+
+创建 git commit 时：
+
+- 提交说明必须使用**中文**（标题和正文都用中文）
+- 不要加入 `Co-authored-by: Cursor <cursoragent@cursor.com>`
+- 不要加入任何指向 Cursor / `cursoragent` 的 `Co-authored-by` 行
+- 不要向 `git commit` 传入 `--trailer "Co-authored-by: Cursor <cursoragent@cursor.com>"`（或等价写法）
+
+```text
+# ❌ BAD
+Fix PDF merge encoding.
+
+Co-authored-by: Cursor <cursoragent@cursor.com>
+
+# ✅ GOOD
+修复 PDF 合并时的编码问题。
+```
