@@ -205,6 +205,55 @@ def test_group_rename_refuses_occupied_dest_created_after_preview(tmp_path: Path
     ) == originals
 
 
+def test_three_file_chain_rollback_preserves_all_originals(tmp_path: Path):
+    a = tmp_path / "a.pdf"
+    b = tmp_path / "b.pdf"
+    c = tmp_path / "c.pdf"
+    a.write_bytes(b"AAA")
+    b.write_bytes(b"BBB")
+    c.write_bytes(b"CCC")
+    preview = preview_list_rename(
+        [a, b, c],
+        [True, True, True],
+        ["b", "c", "d"],
+        copy=False,
+    )
+    assert [row.status for row in preview.rows] == ["ok", "ok", "ok"]
+    occupant = tmp_path / "d.pdf"
+    occupant.write_bytes(b"OCCUPANT-UNIQUE")
+    result = execute_renames(preview.rows, copy=False)
+    assert occupant.read_bytes() == b"OCCUPANT-UNIQUE"
+    assert result.failed
+    originals = {b"AAA", b"BBB", b"CCC"}
+    survivors: set[bytes] = set()
+    for name in ("a.pdf", "b.pdf", "c.pdf"):
+        path = tmp_path / name
+        if path.exists() and path.resolve() != occupant.resolve():
+            survivors.add(path.read_bytes())
+    for path in result.temps_left:
+        if path.exists():
+            survivors.add(path.read_bytes())
+    assert survivors == originals
+
+
+def test_snapshot_ok_empty_template_is_rule_mode(tmp_path: Path):
+    src = tmp_path / "scan.pdf"
+    src.write_bytes(b"KEEP")
+    preview = preview_template_rename(
+        [src],
+        [True],
+        template="",
+        prefix="pre_",
+        suffix="",
+        copy=False,
+        date="20260919",
+    )
+    assert preview.template == ""
+    assert snapshot_ok(preview) is True
+    assert src.read_bytes() == b"KEEP"
+    assert src.exists()
+
+
 def test_copy_cancel_keeps_completed_copy(tmp_path: Path):
     a = tmp_path / "a.pdf"
     b = tmp_path / "b.pdf"

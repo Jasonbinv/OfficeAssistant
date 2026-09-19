@@ -342,7 +342,7 @@ def snapshot_ok(preview: PreviewResult) -> bool:
     if any(not path.is_file() for path in preview.files):
         return False
     try:
-        if not preview.template:
+        if preview.template is None:
             fresh = preview_list_rename(
                 preview.files,
                 preview.checked,
@@ -428,11 +428,17 @@ def _rollback_group_finalize(
     old: Path,
     result: ExecuteResult,
 ) -> None:
-    for done_old, done_dest in reversed(finalized):
+    parked: list[tuple[Path, Path]] = []
+    for done_old, done_dest in finalized:
+        parking = _temp_path_for(done_dest)
         try:
-            done_dest.replace(done_old)
+            done_dest.replace(parking)
         except OSError:
             result.temps_left.append(done_dest)
+            continue
+        parked.append((done_old, parking))
+    for done_old, parking in parked:
+        _restore_temp(parking, done_old, result.temps_left)
     _restore_temp(temp, old, result.temps_left)
     for _, later_old, later_temp in staged[index + 1 :]:
         _restore_temp(later_temp, later_old, result.temps_left)
