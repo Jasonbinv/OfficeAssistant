@@ -64,13 +64,15 @@ def test_main_window_shell_without_display():
     assert nav is not None
     assert [nav.item(i).text() for i in range(nav.count())] == ["合并 PDF", "删除页面", "重命名"]
 
+    from office_assistant.ui.delete_page import DeletePage
+    from office_assistant.ui.merge_page import MergePage
     from office_assistant.ui.rename_page import RenamePage
 
     stack = win.findChild(QStackedWidget)
     assert stack is not None
     assert stack.count() == 3
-    assert stack.widget(0).text() == "合并 PDF（占位）"
-    assert stack.widget(1).text() == "删除页面（占位）"
+    assert isinstance(stack.widget(0), MergePage)
+    assert isinstance(stack.widget(1), DeletePage)
     assert isinstance(stack.widget(2), RenamePage)
 
     cancel = next(btn for btn in win.findChildren(QPushButton) if btn.text() == "取消")

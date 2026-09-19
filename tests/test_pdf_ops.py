@@ -92,3 +92,10 @@ def test_render_thumbnail_png_header(tmp_path: Path):
     src = make_blank_pdf(tmp_path / "a.pdf", 1)
     data = render_thumbnail(src, 0)
     assert data[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def test_render_thumbnail_cancel_returns_empty(tmp_path: Path):
+    src = make_blank_pdf(tmp_path / "a.pdf", 1)
+    ev = threading.Event()
+    ev.set()
+    assert render_thumbnail(src, 0, cancel_event=ev) == b""

@@ -5,6 +5,8 @@ from collections.abc import Callable
 from typing import Any
 
 from office_assistant.tasks.worker import JobWorker
+from office_assistant.ui.delete_page import DeletePage
+from office_assistant.ui.merge_page import MergePage
 from office_assistant.ui.rename_page import RenamePage
 from PySide6.QtCore import QThread, QTimer
 from PySide6.QtWidgets import (
@@ -20,7 +22,6 @@ from PySide6.QtWidgets import (
 )
 
 NAV_ITEMS = ("合并 PDF", "删除页面", "重命名")
-PLACEHOLDERS = ("合并 PDF（占位）", "删除页面（占位）")
 
 
 class MainWindow(QMainWindow):
@@ -41,8 +42,8 @@ class MainWindow(QMainWindow):
             self.nav.addItem(title)
 
         self.stack = QStackedWidget()
-        for text in PLACEHOLDERS:
-            self.stack.addWidget(QLabel(text))
+        self.stack.addWidget(MergePage())
+        self.stack.addWidget(DeletePage())
         self.stack.addWidget(RenamePage())
 
         self.nav.currentRowChanged.connect(self.stack.setCurrentIndex)
@@ -78,10 +79,12 @@ class MainWindow(QMainWindow):
     def job_busy(self) -> bool:
         return self._thread is not None or bool(self._job_queue)
 
-    def _sync_rename_page_actions(self) -> None:
-        page = self.stack.widget(2)
-        if isinstance(page, RenamePage):
-            page.sync_action_buttons()
+    def _sync_page_actions(self) -> None:
+        for index in range(self.stack.count()):
+            page = self.stack.widget(index)
+            sync = getattr(page, "sync_action_buttons", None)
+            if callable(sync):
+                sync()
 
     def start_job(self, fn: Callable[[], Any], on_done: Callable[[Any], None] | None = None) -> None:
         if self._thread is not None:
@@ -107,6 +110,7 @@ class MainWindow(QMainWindow):
         self._thread = thread
         self._worker = worker
         thread.start()
+        self._sync_page_actions()
 
     def _on_cancel(self) -> None:
         self.cancel_event.set()
@@ -138,4 +142,4 @@ class MainWindow(QMainWindow):
             fn, on_done = self._job_queue.pop(0)
             QTimer.singleShot(0, lambda: self.start_job(fn, on_done))
             return
-        self._sync_rename_page_actions()
+        self._sync_page_actions()

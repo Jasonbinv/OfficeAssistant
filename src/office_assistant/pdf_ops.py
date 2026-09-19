@@ -101,9 +101,14 @@ def render_thumbnail(
     page_index_zero: int,
     max_edge: int = 160,
     password: str | None = None,
+    cancel_event: threading.Event | None = None,
 ) -> bytes:
+    if _cancelled(cancel_event):
+        return b""
     pdf = pdfium.PdfDocument(path.open("rb"), password=password or "", autoclose=True)
     try:
+        if _cancelled(cancel_event):
+            return b""
         page = pdf[page_index_zero]
         try:
             width, height = page.get_size()
