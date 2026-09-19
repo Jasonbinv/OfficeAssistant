@@ -56,7 +56,6 @@ exe = EXE(
 )
 coll = COLLECT(exe, a.binaries, a.datas, name="OfficeAssistant")
 
-# PyInstaller 6 onedir: "." datas land under _internal; copy user guide beside the exe.
-_dist_app = Path(DISTPATH) / "OfficeAssistant"
-if user_guide.is_file() and _dist_app.is_dir():
-    shutil.copy2(user_guide, _dist_app / user_guide.name)
+# PyInstaller 6 onedir: "." datas land under _internal; copy beside exe after COLLECT.
+if user_guide.is_file():
+    shutil.copy2(user_guide, Path(coll.name) / user_guide.name)
