@@ -1,3 +1,4 @@
+import shutil
 import threading
 from pathlib import Path
 from unittest.mock import patch
@@ -175,3 +176,52 @@ def test_cancel_stops_remaining(tmp_path: Path):
     ev.set()
     result = execute_renames(preview.rows, copy=False, cancel_event=ev)
     assert len(result.succeeded) == 0
+
+
+def test_group_rename_refuses_occupied_dest_created_after_preview(tmp_path: Path):
+    a = tmp_path / "a.pdf"
+    b = tmp_path / "b.pdf"
+    a.write_bytes(b"AAA-ORIGINAL")
+    b.write_bytes(b"BBB-ORIGINAL")
+    preview = preview_list_rename([a, b], [True, True], ["b", "c"], copy=False)
+    assert preview.rows[0].status == "ok"
+    assert preview.rows[1].status == "ok"
+    occupant = tmp_path / "c.pdf"
+    occupant.write_bytes(b"OCCUPANT-UNIQUE")
+    result = execute_renames(preview.rows, copy=False)
+    assert occupant.read_bytes() == b"OCCUPANT-UNIQUE"
+    assert result.failed
+    originals = {b"AAA-ORIGINAL", b"BBB-ORIGINAL"}
+    if result.temps_left:
+        leftover = {path.read_bytes() for path in result.temps_left if path.exists()}
+        assert leftover <= originals
+    restored = []
+    for name in ("a.pdf", "b.pdf"):
+        path = tmp_path / name
+        if path.exists():
+            restored.append(path.read_bytes())
+    assert set(restored) | (
+        {path.read_bytes() for path in result.temps_left if path.exists()}
+    ) == originals
+
+
+def test_copy_cancel_keeps_completed_copy(tmp_path: Path):
+    a = tmp_path / "a.pdf"
+    b = tmp_path / "b.pdf"
+    a.write_bytes(b"A")
+    b.write_bytes(b"B")
+    preview = preview_list_rename([a, b], [True, True], ["a-copy", "b-copy"], copy=True)
+    ev = threading.Event()
+    real_copy2 = shutil.copy2
+
+    def copy_then_cancel(src, dest, *args, **kwargs):
+        real_copy2(src, dest, *args, **kwargs)
+        ev.set()
+
+    with patch("office_assistant.rename_ops.shutil.copy2", side_effect=copy_then_cancel):
+        result = execute_renames(preview.rows, copy=True, cancel_event=ev)
+    copied = tmp_path / "a-copy.pdf"
+    assert copied.exists()
+    assert copied.read_bytes() == b"A"
+    assert not (tmp_path / "b-copy.pdf").exists()
+    assert len(result.succeeded) == 1

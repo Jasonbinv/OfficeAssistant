@@ -406,6 +406,38 @@ def _restore_temp(temp: Path, original: Path, temps_left: list[Path]) -> None:
         temps_left.append(temp)
 
 
+def _is_staged_temp(dest: Path, staged_temps: set[Path]) -> bool:
+    if dest in staged_temps:
+        return True
+    if not dest.exists():
+        return False
+    for temp in staged_temps:
+        try:
+            if temp.exists() and dest.samefile(temp):
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def _rollback_group_finalize(
+    staged: list[tuple[RenameRow, Path, Path]],
+    finalized: list[tuple[Path, Path]],
+    index: int,
+    temp: Path,
+    old: Path,
+    result: ExecuteResult,
+) -> None:
+    for done_old, done_dest in reversed(finalized):
+        try:
+            done_dest.replace(done_old)
+        except OSError:
+            result.temps_left.append(done_dest)
+    _restore_temp(temp, old, result.temps_left)
+    for _, later_old, later_temp in staged[index + 1 :]:
+        _restore_temp(later_temp, later_old, result.temps_left)
+
+
 def _rename_independent(row: RenameRow, result: ExecuteResult) -> None:
     src = row.path
     dest = src.with_name(row.new_name)
@@ -504,20 +536,18 @@ def _rename_group(rows: list[RenameRow], result: ExecuteResult) -> None:
             return
         staged.append((row, src, temp))
 
+    staged_temps = {temp for _, _, temp in staged}
     finalized: list[tuple[Path, Path]] = []
     for index, (row, old, temp) in enumerate(staged):
         dest = old.with_name(row.new_name)
+        if dest.exists() and not _is_staged_temp(dest, staged_temps):
+            _rollback_group_finalize(staged, finalized, index, temp, old, result)
+            result.failed.append(_fail_msg(dest.name, "目标文件名已被占用"))
+            return
         try:
             temp.replace(dest)
         except OSError as exc:
-            for done_old, done_dest in reversed(finalized):
-                try:
-                    done_dest.replace(done_old)
-                except OSError:
-                    result.temps_left.append(done_dest)
-            _restore_temp(temp, old, result.temps_left)
-            for _, later_old, later_temp in staged[index + 1 :]:
-                _restore_temp(later_temp, later_old, result.temps_left)
+            _rollback_group_finalize(staged, finalized, index, temp, old, result)
             result.failed.append(_fail_msg(row.old_name, str(exc)))
             return
         finalized.append((old, dest))
@@ -534,17 +564,16 @@ def _copy_row(row: RenameRow, result: ExecuteResult, cancel_event: threading.Eve
     if dest.exists():
         result.failed.append(_fail_msg(dest.name, "目标文件名已被占用"))
         return True
+    if _cancelled(cancel_event):
+        return False
     try:
         shutil.copy2(src, dest)
     except OSError as exc:
         dest.unlink(missing_ok=True)
         result.failed.append(_fail_msg(src.name, str(exc)))
         return True
-    if _cancelled(cancel_event):
-        dest.unlink(missing_ok=True)
-        return False
     result.succeeded.append((src, dest))
-    return True
+    return not _cancelled(cancel_event)
 
 
 def execute_renames(
