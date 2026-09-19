@@ -5,6 +5,7 @@ from collections.abc import Callable
 from typing import Any
 
 from office_assistant.tasks.worker import JobWorker
+from office_assistant.ui.rename_page import RenamePage
 from PySide6.QtCore import QThread
 from PySide6.QtWidgets import (
     QHBoxLayout,
@@ -19,7 +20,7 @@ from PySide6.QtWidgets import (
 )
 
 NAV_ITEMS = ("合并 PDF", "删除页面", "重命名")
-PLACEHOLDERS = ("合并 PDF（占位）", "删除页面（占位）", "重命名（占位）")
+PLACEHOLDERS = ("合并 PDF（占位）", "删除页面（占位）")
 
 
 class MainWindow(QMainWindow):
@@ -41,6 +42,7 @@ class MainWindow(QMainWindow):
         self.stack = QStackedWidget()
         for text in PLACEHOLDERS:
             self.stack.addWidget(QLabel(text))
+        self.stack.addWidget(RenamePage())
 
         self.nav.currentRowChanged.connect(self.stack.setCurrentIndex)
         self.nav.setCurrentRow(0)
