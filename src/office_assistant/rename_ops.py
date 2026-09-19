@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
 
+from office_assistant.constants import TEMP_PREFIX
 from office_assistant.naming import (
     apply_template,
     build_new_filename,
@@ -18,7 +19,6 @@ from office_assistant.naming import (
 )
 
 SKIP_FILES = {"desktop.ini", "thumbs.db"}
-TEMP_PREFIX = ".~$oa$"
 
 _FILE_ATTRIBUTE_HIDDEN = 0x2
 _INVALID_FILE_ATTRIBUTES = 0xFFFFFFFF

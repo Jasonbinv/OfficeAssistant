@@ -1,7 +1,7 @@
 from pathlib import Path
 import threading
 from pypdf import PdfReader, PdfWriter
-from office_assistant.pdf_ops import delete_pages, merge_pdfs, probe_pdf
+from office_assistant.pdf_ops import delete_pages, merge_pdfs, probe_pdf, render_thumbnail
 from tests.conftest import make_blank_pdf
 
 
@@ -86,3 +86,9 @@ def test_merge_owner_password_pdfs_without_user_password(tmp_path: Path):
     merge_pdfs([a, b], dest)
     assert len(PdfReader(dest).pages) == 5
     assert a.exists() and b.exists()
+
+
+def test_render_thumbnail_png_header(tmp_path: Path):
+    src = make_blank_pdf(tmp_path / "a.pdf", 1)
+    data = render_thumbnail(src, 0)
+    assert data[:8] == b"\x89PNG\r\n\x1a\n"

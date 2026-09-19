@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+import io
 import os
 import threading
 from dataclasses import dataclass
 from pathlib import Path
 
+import pypdfium2 as pdfium
 from pypdf import PasswordType, PdfReader, PdfWriter
 
-from office_assistant.rename_ops import TEMP_PREFIX
+from office_assistant.constants import TEMP_PREFIX
 
 
 @dataclass
@@ -92,6 +94,32 @@ def merge_pdfs(
         _remove_path(_temp_for(dest))
         return
     _write_atomically(writer, dest, cancel_event)
+
+
+def render_thumbnail(
+    path: Path,
+    page_index_zero: int,
+    max_edge: int = 160,
+    password: str | None = None,
+) -> bytes:
+    pdf = pdfium.PdfDocument(path.open("rb"), password=password or "", autoclose=True)
+    try:
+        page = pdf[page_index_zero]
+        try:
+            width, height = page.get_size()
+            longest = max(width, height)
+            scale = (max_edge / longest) if longest else 1.0
+            bitmap = page.render(scale=scale)
+            try:
+                buffer = io.BytesIO()
+                bitmap.to_pil().save(buffer, format="PNG")
+                return buffer.getvalue()
+            finally:
+                bitmap.close()
+        finally:
+            page.close()
+    finally:
+        pdf.close()
 
 
 def delete_pages(
