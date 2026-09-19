@@ -251,3 +251,29 @@ def test_undo_immediately_when_enabled_after_confirm(tmp_path: Path):
     assert not (tmp_path / "水施-01_封皮.pdf").exists()
     assert not (tmp_path / "水施-01_图纸目录.pdf").exists()
     _ = app
+
+
+def test_double_undo_after_confirm_no_failure_summary(tmp_path: Path):
+    app = _app()
+    win = MainWindow()
+    page = _page(win)
+    _touch(tmp_path, "扫描1.pdf")
+    _touch(tmp_path, "扫描2.pdf")
+    _load_dir(page, tmp_path)
+    page.name_edit.setPlainText("水施-01_封皮\n水施-01_图纸目录")
+
+    undo = _button(page, "撤销上次重命名")
+    _button(page, "确认重命名").click()
+    _wait_until(lambda: "成功 2 个" in win.summary_label.text() and win._thread is None)
+    undo.click()
+    undo.click()
+    _wait_until(
+        lambda: (tmp_path / "扫描1.pdf").exists()
+        and (tmp_path / "扫描2.pdf").exists()
+        and win._thread is None
+    )
+    summary = win.summary_label.text()
+    assert "失败 0 个" in summary
+    assert (tmp_path / "扫描1.pdf").exists()
+    assert (tmp_path / "扫描2.pdf").exists()
+    _ = app

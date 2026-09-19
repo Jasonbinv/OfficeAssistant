@@ -390,8 +390,29 @@ class RenamePage(QWidget):
             self.unused_label.setText("未使用的名单：" + "、".join(preview.unused_names))
         else:
             self.unused_label.setText("")
-        has_ok = any(row.status == STATUS_OK for row in preview.rows)
+        self.sync_action_buttons()
+
+    def _job_busy(self) -> bool:
+        window = self.window()
+        busy = getattr(window, "job_busy", None)
+        if callable(busy):
+            return bool(busy())
+        return getattr(window, "_thread", None) is not None
+
+    def sync_action_buttons(self) -> None:
+        if self._job_busy():
+            self.confirm_btn.setEnabled(False)
+            self.undo_btn.setEnabled(False)
+            return
+        has_ok = self._preview is not None and any(
+            row.status == STATUS_OK for row in self._preview.rows
+        )
         self.confirm_btn.setEnabled(has_ok)
+        self.undo_btn.setEnabled(self._last_batch is not None)
+
+    def _disable_rename_actions_for_job(self) -> None:
+        self.confirm_btn.setEnabled(False)
+        self.undo_btn.setEnabled(False)
 
     def _set_summary(self, text: str) -> None:
         label = getattr(self.window(), "summary_label", None)
@@ -438,38 +459,43 @@ class RenamePage(QWidget):
                 return SNAPSHOT_STALE
             return execute_renames(rows, copy=copy, cancel_event=self._cancel_event())
 
+        self._disable_rename_actions_for_job()
         self._start_job(job, self._on_execute_done)
 
     def _on_execute_done(self, result: object) -> None:
         if result == SNAPSHOT_STALE:
             self._warn_stale()
+            self.sync_action_buttons()
             return
         if not isinstance(result, ExecuteResult):
             self._set_summary(str(result))
+            self.sync_action_buttons()
             return
         self._last_batch = result if result.succeeded else None
-        self.undo_btn.setEnabled(self._last_batch is not None)
         self._set_summary(self._format_summary(result))
         self.refresh_files()
+        self.sync_action_buttons()
 
     def _on_undo(self) -> None:
         batch = self._last_batch
-        if batch is None:
+        if batch is None or self._job_busy():
             return
 
         def job():
             return undo_renames(batch, cancel_event=self._cancel_event())
 
+        self._disable_rename_actions_for_job()
         self._start_job(job, self._on_undo_done)
 
     def _on_undo_done(self, result: object) -> None:
         if not isinstance(result, ExecuteResult):
             self._set_summary(str(result))
+            self.sync_action_buttons()
             return
         self._last_batch = None
-        self.undo_btn.setEnabled(False)
         self._set_summary(self._format_summary(result))
         self.refresh_files()
+        self.sync_action_buttons()
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
         if event.mimeData().hasUrls():

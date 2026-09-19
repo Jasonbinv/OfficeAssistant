@@ -75,6 +75,14 @@ class MainWindow(QMainWindow):
         central.setLayout(root)
         self.setCentralWidget(central)
 
+    def job_busy(self) -> bool:
+        return self._thread is not None or bool(self._job_queue)
+
+    def _sync_rename_page_actions(self) -> None:
+        page = self.stack.widget(2)
+        if isinstance(page, RenamePage):
+            page.sync_action_buttons()
+
     def start_job(self, fn: Callable[[], Any], on_done: Callable[[Any], None] | None = None) -> None:
         if self._thread is not None:
             self._job_queue.append((fn, on_done))
@@ -126,7 +134,8 @@ class MainWindow(QMainWindow):
             return
         self._thread = None
         self._worker = None
-        if not self._job_queue:
+        if self._job_queue:
+            fn, on_done = self._job_queue.pop(0)
+            QTimer.singleShot(0, lambda: self.start_job(fn, on_done))
             return
-        fn, on_done = self._job_queue.pop(0)
-        QTimer.singleShot(0, lambda: self.start_job(fn, on_done))
+        self._sync_rename_page_actions()
