@@ -1,11 +1,15 @@
+import threading
 from pathlib import Path
 from unittest.mock import patch
 
 from office_assistant.rename_ops import (
     _is_hidden_windows,
+    execute_renames,
     list_directory_files,
     preview_list_rename,
     preview_template_rename,
+    snapshot_ok,
+    undo_renames,
 )
 
 def _touch(dir: Path, name: str) -> Path:
@@ -121,3 +125,53 @@ def test_template_preview(tmp_path: Path):
     )
     assert result.rows[0].new_name == "扫描_01.pdf"
     assert result.rows[0].status == "ok"
+
+
+def test_execute_inplace_swap(tmp_path: Path):
+    a = tmp_path / "a.pdf"
+    b = tmp_path / "b.pdf"
+    a.write_bytes(b"A")
+    b.write_bytes(b"B")
+    preview = preview_list_rename([a, b], [True, True], ["b", "a"], copy=False)
+    assert snapshot_ok(preview)
+    execute_renames(preview.rows, copy=False)
+    assert (tmp_path / "a.pdf").read_bytes() == b"B"
+    assert (tmp_path / "b.pdf").read_bytes() == b"A"
+
+
+def test_execute_copy_keeps_original(tmp_path: Path):
+    a = _touch(tmp_path, "a.pdf")
+    a.write_bytes(b"A")
+    preview = preview_list_rename([a], [True], ["新名"], copy=True)
+    result = execute_renames(preview.rows, copy=True)
+    assert (tmp_path / "a.pdf").read_bytes() == b"A"
+    assert (tmp_path / "新名.pdf").read_bytes() == b"A"
+    undone = undo_renames(result)
+    assert not (tmp_path / "新名.pdf").exists()
+    assert (tmp_path / "a.pdf").exists()
+
+
+def test_snapshot_ok_false_when_file_disappears(tmp_path: Path):
+    a = _touch(tmp_path, "a.pdf")
+    preview = preview_list_rename([a], [True], ["b"], copy=False)
+    a.unlink()
+    assert snapshot_ok(preview) is False
+
+
+def test_case_only_rename(tmp_path: Path):
+    a = _touch(tmp_path, "Abc.pdf")
+    preview = preview_list_rename([a], [True], ["abc"], copy=False)
+    assert preview.rows[0].status == "ok"
+    execute_renames(preview.rows, copy=False)
+    remaining = list(tmp_path.iterdir())
+    assert remaining[0].name == "abc.pdf"
+
+
+def test_cancel_stops_remaining(tmp_path: Path):
+    files = [_touch(tmp_path, f"{i}.pdf") for i in range(5)]
+    names = [f"n{i}" for i in range(5)]
+    preview = preview_list_rename(files, [True] * 5, names, copy=False)
+    ev = threading.Event()
+    ev.set()
+    result = execute_renames(preview.rows, copy=False, cancel_event=ev)
+    assert len(result.succeeded) == 0
