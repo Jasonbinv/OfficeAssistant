@@ -101,6 +101,7 @@ class DeletePage(QWidget):
         self._thumb_thread: QThread | None = None
         self._thumb_worker: _ThumbWorker | None = None
         self._pending_indexes: list[int] = []
+        self._thumbs_paused = False
         self.setAcceptDrops(True)
         self._build_ui()
         self.sync_action_buttons()
@@ -182,12 +183,18 @@ class DeletePage(QWidget):
             thread.quit()
             thread.wait()
 
+    def _thumbs_blocked(self) -> bool:
+        return self._thumbs_paused or self._job_busy()
+
     def _clear_thumb_thread(self) -> None:
         sender = self.sender()
         if sender is not None and sender is not self._thumb_thread:
             return
         self._thumb_thread = None
         self._thumb_worker = None
+        if self._thumbs_blocked():
+            self._pending_indexes = []
+            return
         if self._pending_indexes:
             pending = self._pending_indexes
             self._pending_indexes = []
@@ -210,7 +217,7 @@ class DeletePage(QWidget):
         return super().event(event)
 
     def _queue_visible_thumbs(self) -> None:
-        if self._src is None or not self.isVisible():
+        if self._src is None or not self.isVisible() or self._thumbs_blocked():
             return
         pending = [index for index in self._visible_indexes() if index not in self._rendered]
         if not pending:
@@ -222,7 +229,7 @@ class DeletePage(QWidget):
         self._start_thumb_worker(pending)
 
     def _start_thumb_worker(self, indexes: list[int]) -> None:
-        if self._src is None or not indexes or not self.isVisible():
+        if self._src is None or not indexes or not self.isVisible() or self._thumbs_blocked():
             return
         self._thumb_cancel = threading.Event()
         gen = self._thumb_gen
@@ -422,8 +429,10 @@ class DeletePage(QWidget):
             return None
         if not self._confirm_overwrite():
             return None
+        self._thumbs_paused = True
         self._cancel_thumbs()
         if is_locked(src):
+            self._thumbs_paused = False
             QMessageBox.warning(self, "提示", "文件被占用，请先关闭后再试")
             return None
         return src
@@ -464,11 +473,13 @@ class DeletePage(QWidget):
             return
         dest = self._prepare_dest()
         if dest is None or self._src is None:
+            self._thumbs_paused = False
             return
         src = self._src
         pages = set(self.selected_pages)
         password = self._password
         if dest.resolve() == src.resolve():
+            self._thumbs_paused = True
             self._cancel_thumbs()
 
         def job():
@@ -479,6 +490,7 @@ class DeletePage(QWidget):
         self._start_job(job, self._on_delete_done)
 
     def _on_delete_done(self, result: object) -> None:
+        self._thumbs_paused = False
         if isinstance(result, Path):
             self._set_summary(f"已保存到 {result.name}")
             if self._src is not None and result.resolve() == self._src.resolve():

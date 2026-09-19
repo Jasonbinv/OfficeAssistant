@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QTableWidget,
 )
 
+from office_assistant.rename_ops import ExecuteResult
 from office_assistant.ui.main_window import MainWindow
 from office_assistant.ui.rename_page import RenamePage
 
@@ -250,6 +251,72 @@ def test_undo_immediately_when_enabled_after_confirm(tmp_path: Path):
     _wait_until(lambda: (tmp_path / "扫描1.pdf").exists() and (tmp_path / "扫描2.pdf").exists())
     assert not (tmp_path / "水施-01_封皮.pdf").exists()
     assert not (tmp_path / "水施-01_图纸目录.pdf").exists()
+    _ = app
+
+
+def test_format_summary_includes_failed_skipped_and_temps_left(tmp_path: Path):
+    _app()
+    page = RenamePage()
+    leftover = tmp_path / ".~$oa$deadbeef.pdf"
+    leftover.write_bytes(b"t")
+    result = ExecuteResult(
+        succeeded=[(tmp_path / "a.pdf", tmp_path / "b.pdf")],
+        skipped=["扫描3.pdf（名单缺一行）"],
+        failed=["foo.pdf（文件被占用）"],
+        temps_left=[leftover],
+        copy=False,
+    )
+    text = page._format_summary(result)
+    assert "成功 1 个" in text
+    assert "跳过 1 个" in text
+    assert "名单缺一行" in text
+    assert "失败 1 个" in text
+    assert "foo.pdf" in text
+    assert leftover.name in text
+
+
+def test_undo_keeps_residual_batch_when_some_fail(tmp_path: Path):
+    app = _app()
+    win = MainWindow()
+    page = _page(win)
+    _touch(tmp_path, "扫描1.pdf")
+    _touch(tmp_path, "扫描2.pdf")
+    _load_dir(page, tmp_path)
+    page.name_edit.setPlainText("新1\n新2")
+
+    _button(page, "确认重命名").click()
+    _wait_until(lambda: (tmp_path / "新1.pdf").exists() and win._thread is None)
+
+    (tmp_path / "扫描1.pdf").write_bytes(b"OCCUPIER")
+    _button(page, "撤销上次重命名").click()
+    _wait_until(lambda: win._thread is None and "失败" in win.summary_label.text())
+
+    assert (tmp_path / "新1.pdf").exists()
+    assert (tmp_path / "扫描2.pdf").exists()
+    assert page._last_batch is not None
+    assert _button(page, "撤销上次重命名").isEnabled() is True
+
+    (tmp_path / "扫描1.pdf").unlink()
+    _button(page, "撤销上次重命名").click()
+    _wait_until(lambda: (tmp_path / "扫描1.pdf").exists() and win._thread is None)
+    assert not (tmp_path / "新1.pdf").exists()
+    assert page._last_batch is None
+    _ = app
+
+
+def test_confirm_ignored_when_job_busy(tmp_path: Path):
+    app = _app()
+    win = MainWindow()
+    page = _page(win)
+    _touch(tmp_path, "扫描1.pdf")
+    _load_dir(page, tmp_path)
+    page.name_edit.setPlainText("新名")
+    with patch.object(page, "_job_busy", return_value=True):
+        page._on_confirm()
+        app.processEvents()
+    _wait_until(lambda: win._thread is None)
+    assert (tmp_path / "扫描1.pdf").exists()
+    assert not (tmp_path / "新名.pdf").exists()
     _ = app
 
 

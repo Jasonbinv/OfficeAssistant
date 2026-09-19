@@ -317,6 +317,28 @@ def test_overwrite_cancels_thumbs_before_is_locked(tmp_path: Path):
     _ = app
 
 
+def test_queue_visible_thumbs_skipped_while_overwrite_or_job(tmp_path: Path):
+    app = _app()
+    win = MainWindow()
+    page = _page(win)
+    src = make_blank_pdf(tmp_path / "src.pdf", 3)
+    page.open_pdf(src)
+    page._rendered.clear()
+    with (
+        patch.object(page, "isVisible", return_value=True),
+        patch.object(page, "_visible_indexes", return_value=[0, 1]),
+        patch.object(page, "_start_thumb_worker") as start,
+    ):
+        with patch.object(page, "_job_busy", return_value=True):
+            page._queue_visible_thumbs()
+        start.assert_not_called()
+        page._thumbs_paused = True
+        with patch.object(page, "_job_busy", return_value=False):
+            page._queue_visible_thumbs()
+        start.assert_not_called()
+    _ = app
+
+
 def test_delete_save_dialog_dont_confirm_overwrite(tmp_path: Path):
     app = _app()
     win = MainWindow()

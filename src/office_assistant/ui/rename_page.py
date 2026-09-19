@@ -420,11 +420,17 @@ class RenamePage(QWidget):
             label.setText(text)
 
     def _format_summary(self, result: ExecuteResult) -> str:
-        return (
-            f"成功 {len(result.succeeded)} 个，"
-            f"跳过 {len(result.skipped)} 个，"
-            f"失败 {len(result.failed)} 个"
-        )
+        skipped = f"跳过 {len(result.skipped)} 个"
+        if result.skipped:
+            skipped += f"（{'；'.join(result.skipped)}）"
+        failed = f"失败 {len(result.failed)} 个"
+        if result.failed:
+            failed += f"（{'；'.join(result.failed)}）"
+        text = f"成功 {len(result.succeeded)} 个，{skipped}，{failed}"
+        if result.temps_left:
+            names = "、".join(path.name for path in result.temps_left)
+            text += f"。残留临时文件：{names}"
+        return text
 
     def _cancel_event(self):
         return getattr(self.window(), "cancel_event", None)
@@ -445,6 +451,8 @@ class RenamePage(QWidget):
         QMessageBox.warning(self, "提示", "文件已变化，请确认后重试")
 
     def _on_confirm(self) -> None:
+        if self._job_busy():
+            return
         preview = self._preview
         if preview is None or not any(row.status == STATUS_OK for row in preview.rows):
             return
@@ -485,14 +493,33 @@ class RenamePage(QWidget):
             return undo_renames(batch, cancel_event=self._cancel_event())
 
         self._disable_rename_actions_for_job()
-        self._start_job(job, self._on_undo_done)
+        self._start_job(job, lambda outcome, source=batch: self._on_undo_done(outcome, source))
 
-    def _on_undo_done(self, result: object) -> None:
+    def _residual_undo_batch(
+        self, source: ExecuteResult, undo_result: ExecuteResult
+    ) -> ExecuteResult | None:
+        undone = set(undo_result.succeeded)
+        remaining = [(old, new) for old, new in source.succeeded if (new, old) not in undone]
+        if not remaining:
+            return None
+        return ExecuteResult(
+            succeeded=remaining,
+            skipped=[],
+            failed=[],
+            temps_left=list(undo_result.temps_left),
+            copy=source.copy,
+        )
+
+    def _on_undo_done(self, result: object, batch: ExecuteResult | None = None) -> None:
         if not isinstance(result, ExecuteResult):
             self._set_summary(str(result))
             self.sync_action_buttons()
             return
-        self._last_batch = None
+        source = batch if batch is not None else self._last_batch
+        if source is None:
+            self._last_batch = None
+        else:
+            self._last_batch = self._residual_undo_batch(source, result)
         self._set_summary(self._format_summary(result))
         self.refresh_files()
         self.sync_action_buttons()

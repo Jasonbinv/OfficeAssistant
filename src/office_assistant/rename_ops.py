@@ -119,6 +119,16 @@ def _empty_stem(new_name: str, suffix: str) -> bool:
     return not stem
 
 
+_WIN_MAX_PATH = 259
+
+
+def _dest_path_too_long(dest: Path) -> bool:
+    text = str(dest)
+    if text.startswith("\\\\?\\"):
+        return False
+    return len(text) > _WIN_MAX_PATH
+
+
 def _classify_new_name(path: Path, new_name: str) -> RenameRow:
     if _empty_stem(new_name, path.suffix) or is_reserved_device_name(Path(new_name).stem):
         if _empty_stem(new_name, path.suffix):
@@ -141,6 +151,16 @@ def _classify_new_name(path: Path, new_name: str) -> RenameRow:
             new_name=new_name,
             status=STATUS_UNCHANGED,
             message="无需改名",
+        )
+    dest = path.with_name(new_name)
+    if _dest_path_too_long(dest):
+        return RenameRow(
+            path=path,
+            checked=True,
+            old_name=path.name,
+            new_name=new_name,
+            status=STATUS_INVALID,
+            message="路径过长，无法改名",
         )
     return RenameRow(
         path=path,
@@ -401,6 +421,9 @@ def _is_case_only(src: Path, dest: Path) -> bool:
 
 def _restore_temp(temp: Path, original: Path, temps_left: list[Path]) -> None:
     try:
+        if original.exists() and not _is_case_only(temp, original):
+            temps_left.append(temp)
+            return
         temp.replace(original)
     except OSError:
         temps_left.append(temp)

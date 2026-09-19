@@ -3,8 +3,10 @@ import threading
 from pathlib import Path
 from unittest.mock import patch
 
+from office_assistant.constants import TEMP_PREFIX
 from office_assistant.rename_ops import (
     _is_hidden_windows,
+    _restore_temp,
     execute_renames,
     list_directory_files,
     preview_list_rename,
@@ -252,6 +254,63 @@ def test_snapshot_ok_empty_template_is_rule_mode(tmp_path: Path):
     assert snapshot_ok(preview) is True
     assert src.read_bytes() == b"KEEP"
     assert src.exists()
+
+
+def test_restore_temp_occupied_original_keeps_original_bytes(tmp_path: Path):
+    original = tmp_path / "a.pdf"
+    original.write_bytes(b"ORIGINAL-SURVIVE")
+    temp = tmp_path / f"{TEMP_PREFIX}parkfail.pdf"
+    temp.write_bytes(b"TEMP-CONTENT")
+    temps_left: list[Path] = []
+    _restore_temp(temp, original, temps_left)
+    assert original.read_bytes() == b"ORIGINAL-SURVIVE"
+    assert temp.exists()
+    assert temp.read_bytes() == b"TEMP-CONTENT"
+    assert temp in temps_left
+
+
+def test_group_rollback_park_failure_preserves_occupied_original(tmp_path: Path):
+    a = tmp_path / "a.pdf"
+    b = tmp_path / "b.pdf"
+    a.write_bytes(b"AAA-ORIGINAL")
+    b.write_bytes(b"BBB-ORIGINAL")
+    preview = preview_list_rename([a, b], [True, True], ["b", "c"], copy=False)
+    occupant = tmp_path / "c.pdf"
+    occupant.write_bytes(b"OCCUPANT-UNIQUE")
+    real_replace = Path.replace
+    b_to_temp = {"n": 0}
+
+    def replace_fail_second_park(self, target):
+        target_path = Path(target)
+        if self.name == "b.pdf" and target_path.name.startswith(TEMP_PREFIX):
+            b_to_temp["n"] += 1
+            if b_to_temp["n"] >= 2:
+                raise OSError("simulated park failure")
+        return real_replace(self, target)
+
+    with patch.object(Path, "replace", replace_fail_second_park):
+        result = execute_renames(preview.rows, copy=False)
+    assert occupant.read_bytes() == b"OCCUPANT-UNIQUE"
+    originals = {b"AAA-ORIGINAL", b"BBB-ORIGINAL"}
+    survivors: set[bytes] = set()
+    for name in ("a.pdf", "b.pdf"):
+        path = tmp_path / name
+        if path.exists() and path.resolve() != occupant.resolve():
+            survivors.add(path.read_bytes())
+    for path in result.temps_left:
+        if path.exists():
+            survivors.add(path.read_bytes())
+    assert survivors == originals
+
+
+def test_preview_marks_path_too_long_invalid(tmp_path: Path):
+    src = _touch(tmp_path, "a.pdf")
+    long_name = "x" * 300
+    result = preview_list_rename([src], [True], [long_name], copy=False)
+    dest = src.with_name(result.rows[0].new_name or f"{long_name}.pdf")
+    assert len(str(dest)) > 259
+    assert result.rows[0].status == "invalid"
+    assert "过长" in result.rows[0].message
 
 
 def test_copy_cancel_keeps_completed_copy(tmp_path: Path):
