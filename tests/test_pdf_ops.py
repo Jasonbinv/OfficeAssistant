@@ -1,8 +1,19 @@
 from pathlib import Path
 import threading
-from pypdf import PdfReader
+from pypdf import PdfReader, PdfWriter
 from office_assistant.pdf_ops import delete_pages, merge_pdfs, probe_pdf
 from tests.conftest import make_blank_pdf
+
+
+def make_owner_encrypted_pdf(path: Path, pages: int) -> Path:
+    writer = PdfWriter()
+    for _ in range(pages):
+        writer.add_blank_page(width=200, height=200)
+    writer.encrypt(user_password="", owner_password="owner")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("wb") as fh:
+        writer.write(fh)
+    return path
 
 
 def test_probe_ok(tmp_path: Path):
@@ -57,3 +68,21 @@ def test_delete_all_pages_forbidden(tmp_path: Path):
         assert False
     except ValueError:
         pass
+
+
+def test_probe_owner_password_pdf_ok_without_user_password(tmp_path: Path):
+    path = make_owner_encrypted_pdf(tmp_path / "owner.pdf", 2)
+    info = probe_pdf(path)
+    assert info.ok
+    assert not info.needs_password
+    assert info.encrypted
+    assert info.page_count == 2
+
+
+def test_merge_owner_password_pdfs_without_user_password(tmp_path: Path):
+    a = make_owner_encrypted_pdf(tmp_path / "a.pdf", 2)
+    b = make_owner_encrypted_pdf(tmp_path / "b.pdf", 3)
+    dest = tmp_path / "merged.pdf"
+    merge_pdfs([a, b], dest)
+    assert len(PdfReader(dest).pages) == 5
+    assert a.exists() and b.exists()

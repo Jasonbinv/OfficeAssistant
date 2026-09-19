@@ -33,36 +33,15 @@ def probe_pdf(path: Path, password: str | None = None) -> PdfInfo:
     try:
         reader = PdfReader(path)
         encrypted = bool(reader.is_encrypted)
-        if encrypted:
-            if not password:
-                return PdfInfo(
-                    path=path,
-                    ok=False,
-                    encrypted=True,
-                    needs_password=True,
-                    page_count=0,
-                    error="需要密码",
-                )
-            try:
-                decrypted = reader.decrypt(password)
-            except Exception:
-                return PdfInfo(
-                    path=path,
-                    ok=False,
-                    encrypted=True,
-                    needs_password=True,
-                    page_count=0,
-                    error="需要密码",
-                )
-            if decrypted == PasswordType.NOT_DECRYPTED:
-                return PdfInfo(
-                    path=path,
-                    ok=False,
-                    encrypted=True,
-                    needs_password=True,
-                    page_count=0,
-                    error="需要密码",
-                )
+        if encrypted and not _unlock_encrypted_reader(reader, password):
+            return PdfInfo(
+                path=path,
+                ok=False,
+                encrypted=True,
+                needs_password=True,
+                page_count=0,
+                error="需要密码",
+            )
         return PdfInfo(
             path=path,
             ok=True,
@@ -165,14 +144,24 @@ def _lookup_password(path: Path, passwords: dict[Path, str] | None) -> str | Non
     return None
 
 
+def _unlock_encrypted_reader(reader: PdfReader, password: str | None) -> bool:
+    if password is not None:
+        try:
+            decrypted = reader.decrypt(password)
+        except Exception:
+            return False
+        return decrypted != PasswordType.NOT_DECRYPTED
+    try:
+        len(reader.pages)
+    except Exception:
+        return False
+    return True
+
+
 def _open_reader(path: Path, password: str | None) -> PdfReader:
     reader = PdfReader(path)
-    if reader.is_encrypted:
-        if not password:
-            raise ValueError("需要密码")
-        decrypted = reader.decrypt(password)
-        if decrypted == PasswordType.NOT_DECRYPTED:
-            raise ValueError("需要密码")
+    if reader.is_encrypted and not _unlock_encrypted_reader(reader, password):
+        raise ValueError("需要密码")
     return reader
 
 
