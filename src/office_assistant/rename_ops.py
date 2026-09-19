@@ -20,6 +20,12 @@ TEMP_PREFIX = ".~$oa$"
 _FILE_ATTRIBUTE_HIDDEN = 0x2
 _INVALID_FILE_ATTRIBUTES = 0xFFFFFFFF
 
+try:
+    _GetFileAttributesW = ctypes.windll.kernel32.GetFileAttributesW  # type: ignore[attr-defined]
+    _GetFileAttributesW.restype = ctypes.c_uint32
+except AttributeError:
+    _GetFileAttributesW = None
+
 STATUS_OK = "ok"
 STATUS_MISSING_LINE = "missing_line"
 STATUS_INVALID = "invalid"
@@ -53,11 +59,13 @@ class PreviewResult:
 
 
 def _is_hidden_windows(path: Path) -> bool:
+    if _GetFileAttributesW is None:
+        return False
     try:
-        attrs = ctypes.windll.kernel32.GetFileAttributesW(str(path))
+        attrs = _GetFileAttributesW(str(path))
     except Exception:
         return False
-    if attrs == _INVALID_FILE_ATTRIBUTES:
+    if attrs in (-1, _INVALID_FILE_ATTRIBUTES):
         return False
     return bool(attrs & _FILE_ATTRIBUTE_HIDDEN)
 
@@ -242,6 +250,8 @@ def preview_list_rename(
     *,
     copy: bool,
 ) -> PreviewResult:
+    if len(files) != len(checked):
+        raise ValueError("files and checked must have the same length")
     rows: list[RenameRow] = []
     name_index = 0
     for path, is_checked in zip(files, checked):
@@ -275,6 +285,8 @@ def preview_template_rename(
     copy: bool,
     date: str | None = None,
 ) -> PreviewResult:
+    if len(files) != len(checked):
+        raise ValueError("files and checked must have the same length")
     resolved_date = date if date is not None else today_yyyymmdd()
     checked_count = sum(1 for flag in checked if flag)
     width = index_width(checked_count)

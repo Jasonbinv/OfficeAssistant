@@ -1,16 +1,46 @@
 from pathlib import Path
+from unittest.mock import patch
 
 from office_assistant.rename_ops import (
+    _is_hidden_windows,
     list_directory_files,
     preview_list_rename,
     preview_template_rename,
 )
 
-
 def _touch(dir: Path, name: str) -> Path:
     path = dir / name
     path.write_bytes(b"x")
     return path
+
+
+def test_is_hidden_windows_invalid_attributes_not_hidden(tmp_path: Path):
+    path = _touch(tmp_path, "normal.pdf")
+    with patch(
+        "office_assistant.rename_ops._GetFileAttributesW",
+        return_value=0xFFFFFFFF,
+    ):
+        assert _is_hidden_windows(path) is False
+
+
+def test_list_directory_includes_file_when_attributes_unreadable(tmp_path: Path):
+    _touch(tmp_path, "readable.pdf")
+    with patch(
+        "office_assistant.rename_ops._GetFileAttributesW",
+        return_value=0xFFFFFFFF,
+    ):
+        files = list_directory_files(tmp_path, {"pdf"})
+    assert [p.name for p in files] == ["readable.pdf"]
+
+
+def test_preview_mismatched_lengths_raises():
+    path = Path("x.pdf")
+    try:
+        preview_list_rename([path], [True, True], ["a"], copy=False)
+    except ValueError as exc:
+        assert "same length" in str(exc)
+    else:
+        raise AssertionError("expected ValueError")
 
 
 def test_list_directory_skips_hidden_and_desktop_ini(tmp_path: Path):
