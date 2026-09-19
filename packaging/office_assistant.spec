@@ -38,9 +38,20 @@ a = Analysis(
     ],
     hookspath=[],
     runtime_hooks=[],
-    excludes=[],
+    excludes=["numpy"],
     noarchive=False,
 )
+
+# PySide6 6.10+ Qt6Core.dll imports unversioned ICU symbols (ucnv_open).
+# Anaconda's icuuc.dll only exports ucnv_open_73; if it is copied into
+# _internal it shadows Windows System32\icuuc.dll and the exe fails at
+# startup with "无法定位程序输入点 ucnv_open".
+a.binaries = [
+    item
+    for item in a.binaries
+    if not (Path(item[0]).name.lower().startswith("icu") and Path(item[0]).name.lower().endswith(".dll"))
+]
+
 pyz = PYZ(a.pure)
 exe = EXE(
     pyz,

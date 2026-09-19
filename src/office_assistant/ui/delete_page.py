@@ -10,7 +10,7 @@ from office_assistant.qt_preload import preload_pyside6
 
 preload_pyside6()
 
-from PySide6.QtCore import QEvent, QObject, QSize, Qt, QThread, Signal, Slot
+from PySide6.QtCore import QEvent, QObject, QSize, Qt, Signal, Slot
 from PySide6.QtGui import QDragEnterEvent, QDragMoveEvent, QDropEvent, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -49,7 +49,7 @@ def ask_existing_dest(parent: QWidget | None, dest: Path) -> Path | None:
 
 
 class _ThumbWorker(QObject):
-    ready = Signal(int, bytes)
+    ready = Signal(int, int, bytes)
     finished = Signal()
 
     def __init__(
@@ -58,17 +58,32 @@ class _ThumbWorker(QObject):
         indexes: list[int],
         password: str | None,
         cancel_event: threading.Event,
+        gen: int,
         max_edge: int = THUMB_EDGE,
+        parent: QObject | None = None,
     ) -> None:
-        super().__init__()
+        super().__init__(parent)
         self._path = path
         self._indexes = indexes
         self._password = password
         self._cancel = cancel_event
+        self._gen = gen
         self._max_edge = max_edge
+        self._thread: threading.Thread | None = None
 
-    @Slot()
-    def run(self) -> None:
+    def start(self) -> None:
+        self._thread = threading.Thread(target=self._run, name="oa-thumbs", daemon=True)
+        self._thread.start()
+
+    def isRunning(self) -> bool:
+        return self._thread is not None and self._thread.is_alive()
+
+    def wait(self, timeout_s: float = 30.0) -> None:
+        thread = self._thread
+        if thread is not None:
+            thread.join(timeout_s)
+
+    def _run(self) -> None:
         for index in self._indexes:
             if self._cancel.is_set():
                 break
@@ -83,7 +98,7 @@ class _ThumbWorker(QObject):
             except Exception:
                 data = b""
             if data and not self._cancel.is_set():
-                self.ready.emit(index, data)
+                self.ready.emit(self._gen, index, data)
         self.finished.emit()
 
 
@@ -98,7 +113,6 @@ class DeletePage(QWidget):
         self._rendered: set[int] = set()
         self._thumb_gen = 0
         self._thumb_cancel = threading.Event()
-        self._thumb_thread: QThread | None = None
         self._thumb_worker: _ThumbWorker | None = None
         self._pending_indexes: list[int] = []
         self._thumbs_paused = False
@@ -176,21 +190,18 @@ class DeletePage(QWidget):
         self._thumb_gen += 1
         self._thumb_cancel.set()
         self._pending_indexes = []
-        thread = self._thumb_thread
-        self._thumb_thread = None
+        worker = self._thumb_worker
         self._thumb_worker = None
-        if thread is not None:
-            thread.quit()
-            thread.wait()
+        if worker is not None:
+            worker.wait()
 
     def _thumbs_blocked(self) -> bool:
         return self._thumbs_paused or self._job_busy()
 
     def _clear_thumb_thread(self) -> None:
         sender = self.sender()
-        if sender is not None and sender is not self._thumb_thread:
+        if sender is not None and sender is not self._thumb_worker:
             return
-        self._thumb_thread = None
         self._thumb_worker = None
         if self._thumbs_blocked():
             self._pending_indexes = []
@@ -222,8 +233,8 @@ class DeletePage(QWidget):
         pending = [index for index in self._visible_indexes() if index not in self._rendered]
         if not pending:
             return
-        thread = self._thumb_thread
-        if thread is not None and thread.isRunning():
+        worker = self._thumb_worker
+        if worker is not None and worker.isRunning():
             self._pending_indexes = pending
             return
         self._start_thumb_worker(pending)
@@ -233,18 +244,21 @@ class DeletePage(QWidget):
             return
         self._thumb_cancel = threading.Event()
         gen = self._thumb_gen
-        thread = QThread(self)
-        worker = _ThumbWorker(self._src, indexes, self._password, self._thumb_cancel, THUMB_EDGE)
-        worker.moveToThread(thread)
-        thread.started.connect(worker.run)
-        worker.ready.connect(lambda index, data, g=gen: self._on_thumb_ready(g, index, data))
-        worker.finished.connect(thread.quit)
-        thread.finished.connect(worker.deleteLater)
-        thread.finished.connect(self._clear_thumb_thread)
-        self._thumb_thread = thread
+        worker = _ThumbWorker(
+            self._src,
+            indexes,
+            self._password,
+            self._thumb_cancel,
+            gen,
+            THUMB_EDGE,
+            parent=self,
+        )
+        worker.ready.connect(self._on_thumb_ready, Qt.ConnectionType.QueuedConnection)
+        worker.finished.connect(self._clear_thumb_thread, Qt.ConnectionType.QueuedConnection)
         self._thumb_worker = worker
-        thread.start()
+        worker.start()
 
+    @Slot(int, int, bytes)
     def _on_thumb_ready(self, gen: int, index: int, data: bytes) -> None:
         if gen != self._thumb_gen:
             return

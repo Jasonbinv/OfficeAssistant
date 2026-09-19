@@ -76,6 +76,18 @@ class MainWindow(QMainWindow):
         central.setLayout(root)
         self.setCentralWidget(central)
 
+    def closeEvent(self, event) -> None:
+        for index in range(self.stack.count()):
+            page = self.stack.widget(index)
+            cancel = getattr(page, "_cancel_thumbs", None)
+            if callable(cancel):
+                cancel()
+        if self._thread is not None:
+            self.cancel_event.set()
+            self._thread.quit()
+            self._thread.wait(30_000)
+        super().closeEvent(event)
+
     def job_busy(self) -> bool:
         return self._thread is not None or bool(self._job_queue)
 

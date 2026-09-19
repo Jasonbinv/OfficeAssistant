@@ -11,12 +11,13 @@ from office_assistant.qt_preload import preload_pyside6
 
 preload_pyside6()
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QThread
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
     QFileDialog,
     QListWidget,
+    QListWidgetItem,
     QMessageBox,
     QPushButton,
 )
@@ -357,4 +358,50 @@ def test_delete_save_dialog_dont_confirm_overwrite(tmp_path: Path):
     options = mock_save.call_args.kwargs.get("options")
     assert options is not None
     assert options & QFileDialog.Option.DontConfirmOverwrite
+    _ = app
+
+
+def test_thumbnail_ready_runs_on_gui_thread(tmp_path: Path):
+    app = _app()
+    gui_thread = QThread.currentThread()
+    win = MainWindow()
+    page = _page(win)
+    seen: list[QThread] = []
+    original_set_icon = QListWidgetItem.setIcon
+
+    def set_icon(self, icon):
+        seen.append(QThread.currentThread())
+        return original_set_icon(self, icon)
+
+    src = make_blank_pdf(tmp_path / "src.pdf", 2)
+    page.open_pdf(src)
+    with (
+        patch.object(QListWidgetItem, "setIcon", set_icon),
+        patch.object(page, "isVisible", return_value=True),
+        patch.object(page, "_visible_indexes", return_value=[0, 1]),
+    ):
+        page._queue_visible_thumbs()
+        _wait_until(lambda: len(seen) >= 1, timeout_s=8)
+    assert seen[0] is gui_thread
+    page._cancel_thumbs()
+    win.close()
+    app.processEvents()
+    _ = app
+
+
+def test_close_window_while_thumbs_rendering(tmp_path: Path):
+    app = _app()
+    win = MainWindow()
+    page = _page(win)
+    src = make_blank_pdf(tmp_path / "src.pdf", 3)
+    page.open_pdf(src)
+    with (
+        patch.object(page, "isVisible", return_value=True),
+        patch.object(page, "_visible_indexes", return_value=[0, 1, 2]),
+    ):
+        page._queue_visible_thumbs()
+        app.processEvents()
+        win.close()
+        app.processEvents()
+    assert win._thread is None
     _ = app
