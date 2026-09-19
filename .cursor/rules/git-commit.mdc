@@ -1,23 +1,40 @@
 ---
-description: Git commit 使用中文，且不得包含 Cursor 共著者信息
+description: Git commit 使用 type 前缀加中文说明，且不得包含 Cursor 共著者信息
 alwaysApply: true
 ---
 
 # Git 提交说明
 
-创建 git commit 时：
+格式：`<type>: <中文说明>`
 
-- 提交说明必须使用**中文**（标题和正文都用中文）
-- 不要加入 `Co-authored-by: Cursor <cursoragent@cursor.com>`
-- 不要加入任何指向 Cursor / `cursoragent` 的 `Co-authored-by` 行
-- 不要向 `git commit` 传入 `--trailer "Co-authored-by: Cursor <cursoragent@cursor.com>"`（或等价写法）
+- type 保持英文，说明用中文；冒号后一个空格；标题一行、不加句号
+- type 仅用：`feat` / `fix` / `docs` / `chore` / `refactor` / `test` / `build`
+- 标题不要重复 type：`fix` 后不要写「修复」，`feat` 后不要写「新增/添加」
+- 一条提交只做一件事；只暂存本次相关文件
+- 不要提交 `dist/`、`.venv/`、测试样例、密钥
+- 不要加入 Cursor 的 `Co-authored-by`（含 `--trailer`）
+- 提交后检查 `git log -1`；若出现 `Co-authored-by` / `cursoragent`，未推送必须改掉后再结束
+
+type 含义：`feat` 新能力；`fix` 修缺陷；`docs` 文档；`chore` 规则/配置/打包杂项；`refactor` 行为不变；`test` 测试；`build` 构建脚本。
 
 ```text
 # ❌ BAD
-Fix PDF merge encoding.
+fix: PDF merge encoding
+
+# ❌ BAD
+修复 PDF 合并编码问题
+
+# ❌ BAD
+fix: 修复 PDF 合并时的编码问题。
 
 Co-authored-by: Cursor <cursoragent@cursor.com>
 
 # ✅ GOOD
-修复 PDF 合并时的编码问题。
+fix: PDF 合并时的编码问题
+
+# ✅ GOOD
+feat: 增加 PDF 合并工作区
+
+# ✅ GOOD
+chore: 补充中文提交说明规范
 ```
